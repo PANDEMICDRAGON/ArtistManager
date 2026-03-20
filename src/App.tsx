@@ -7,16 +7,7 @@ import {
   User 
 } from 'firebase/auth';
 import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  Timestamp,
-  orderBy
+  getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, Timestamp, getDoc, setDoc
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { handleFirestoreError, OperationType, testConnection } from './services/firestoreService';
@@ -44,11 +35,22 @@ import {
   Settings,
   Bell,
   User as UserIcon,
-  Sparkles
+  Sparkles,
+  Edit2,
+  Filter,
+  AlertCircle,
+  FileText,
+  TrendingUp,
+  Layout
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addDays, isAfter, isBefore } from 'date-fns';
 import { AIManager } from './components/AIManager';
+import { 
+  generatePostContent, 
+  analyzeMusicMetadata, 
+  analyzeMarketTrends 
+} from './services/aiManagerService';
 import { 
   LineChart, 
   Line, 
@@ -100,7 +102,19 @@ interface Task {
   description: string;
   status: 'todo' | 'in-progress' | 'done';
   deadline: string;
-  category?: string;
+  category?: 'social_media' | 'pr' | 'distribution' | 'creative' | 'legal' | 'other';
+}
+
+interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  tasks: {
+    title: string;
+    description: string;
+    category: string;
+    daysFromStart: number;
+  }[];
 }
 
 interface CampaignPost {
@@ -212,6 +226,15 @@ export default function App() {
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [isTaskConfirmOpen, setIsTaskConfirmOpen] = useState(false);
+  const [taskToConfirm, setTaskToConfirm] = useState<Task | null>(null);
+  const [projectTemplates, setProjectTemplates] = useState<ProjectTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [taskFilter, setTaskFilter] = useState<'all' | 'todo' | 'done'>('all');
+  const [taskCategoryFilter, setTaskCategoryFilter] = useState<string>('all');
+  const [isEditingArtist, setIsEditingArtist] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
 
   // Form States
   const [projectForm, setProjectForm] = useState({ 
@@ -224,8 +247,13 @@ export default function App() {
   });
   const [artistForm, setArtistForm] = useState({ name: '', genre: '', bio: '' });
   const [postForm, setPostForm] = useState({ platform: 'instagram' as CampaignPost['platform'], postType: 'feed' as CampaignPost['postType'], content: '' });
-  const [assetForm, setAssetForm] = useState({ name: '', type: 'audio' as Asset['type'], url: '' });
-  const [taskForm, setTaskForm] = useState({ title: '', deadline: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
+  const [assetForm, setAssetForm] = useState({ name: '', type: 'audio' as Asset['type'], url: '', analyze: false });
+  const [taskForm, setTaskForm] = useState({ 
+    title: '', 
+    description: '',
+    deadline: format(addDays(new Date(), 7), 'yyyy-MM-dd'),
+    category: 'other' as Task['category']
+  });
 
   // Analytics State
   const [artistAnalytics, setArtistAnalytics] = useState<ArtistAnalytics | null>(null);
@@ -247,10 +275,26 @@ export default function App() {
   );
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setLoading(false);
-      if (u) testConnection();
+      if (u) {
+        testConnection();
+        // Ensure user document exists for isAdmin check
+        try {
+          const userRef = doc(db, 'users', u.uid);
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            await setDoc(userRef, {
+              email: u.email,
+              role: 'user',
+              createdAt: Timestamp.now()
+            });
+          }
+        } catch (error) {
+          console.error("Error ensuring user document:", error);
+        }
+      }
     });
     return unsubscribe;
   }, []);
@@ -267,6 +311,55 @@ export default function App() {
       }
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'projects'));
     return unsubscribe;
+  }, [user]);
+
+  // Fetch Project Templates & Seed if empty
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, 'projectTemplates'), (snapshot) => {
+      const templates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProjectTemplate));
+      setProjectTemplates(templates);
+      
+      // Seed if empty and user is admin
+      if (templates.length === 0 && (user.email?.toLowerCase() === "mobiero90@gmail.com")) {
+        const seedTemplates = async () => {
+          const defaults = [
+            {
+              name: "Standard Single Release",
+              description: "Essential tasks for a single track release.",
+              tasks: [
+                { title: "Final Master Approval", description: "Review and approve the final master.", category: "creative", daysFromStart: 2 },
+                { title: "Cover Art Finalization", description: "Ensure artwork meets DSP specs.", category: "creative", daysFromStart: 5 },
+                { title: "Metadata Submission", description: "Submit ISRC and track details to distributor.", category: "distribution", daysFromStart: 7 },
+                { title: "Social Media Teaser", description: "Post first teaser on Instagram/TikTok.", category: "social_media", daysFromStart: 10 },
+                { title: "Press Release Draft", description: "Write and review the press release.", category: "pr", daysFromStart: 12 }
+              ]
+            },
+            {
+              name: "EP/Album Campaign",
+              description: "Comprehensive strategy for multi-track releases.",
+              tasks: [
+                { title: "Project Sequencing", description: "Determine the track order.", category: "creative", daysFromStart: 3 },
+                { title: "Marketing Budget Plan", description: "Allocate funds for ads and PR.", category: "pr", daysFromStart: 7 },
+                { title: "Music Video Shoot", description: "Coordinate the lead single video.", category: "creative", daysFromStart: 14 },
+                { title: "Pitch to Playlists", description: "Submit to Spotify for Artists editorial.", category: "distribution", daysFromStart: 21 },
+                { title: "Launch Party Planning", description: "Organize release event or livestream.", category: "pr", daysFromStart: 25 }
+              ]
+            }
+          ];
+
+          for (const t of defaults) {
+            try {
+              await addDoc(collection(db, 'projectTemplates'), t);
+            } catch (e) {
+              console.error("Failed to seed template", e);
+            }
+          }
+        };
+        seedTemplates();
+      }
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'projectTemplates'));
+    return () => unsub();
   }, [user]);
 
   // Fetch Artists
@@ -339,7 +432,7 @@ export default function App() {
     if (!artist) return;
 
     try {
-      await addDoc(collection(db, 'projects'), {
+      const docRef = await addDoc(collection(db, 'projects'), {
         name: projectForm.name,
         artistId: projectForm.artistId,
         artistName: artist.name,
@@ -353,10 +446,99 @@ export default function App() {
         ownerId: user.uid,
         createdAt: Timestamp.now()
       });
+
+      // Apply template if selected
+      if (selectedTemplateId) {
+        const template = projectTemplates.find(t => t.id === selectedTemplateId);
+        if (template) {
+          for (const task of template.tasks) {
+            await addDoc(collection(db, `projects/${docRef.id}/tasks`), {
+              projectId: docRef.id,
+              title: task.title,
+              description: task.description,
+              category: task.category,
+              status: 'todo',
+              deadline: format(addDays(new Date(), task.daysFromStart), 'yyyy-MM-dd'),
+              createdAt: Timestamp.now()
+            });
+          }
+        }
+      }
+
       setIsProjectModalOpen(false);
       setProjectForm({ name: '', artistId: '', type: 'album', isrc: '', upc: '', label: '' });
+      setSelectedTemplateId('');
+      setSelectedProjectId(docRef.id);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'projects');
+    }
+  };
+
+  const handleUpdateArtist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !viewingArtistId) return;
+
+    try {
+      await updateDoc(doc(db, 'artists', viewingArtistId), {
+        name: artistForm.name,
+        genre: artistForm.genre,
+        bio: artistForm.bio,
+        updatedAt: Timestamp.now()
+      });
+      setIsEditingArtist(false);
+      setArtistForm({ name: '', genre: '', bio: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `artists/${viewingArtistId}`);
+    }
+  };
+
+  const startEditingArtist = (artist: Artist) => {
+    setViewingArtistId(artist.id);
+    setArtistForm({
+      name: artist.name,
+      genre: artist.genre || '',
+      bio: artist.bio || ''
+    });
+    setIsEditingArtist(true);
+  };
+
+  const handleGeneratePost = async (platform: string) => {
+    if (!selectedProject) return;
+    setAiLoading(true);
+    try {
+      const content = await generatePostContent(platform, selectedProject);
+      setPostForm({ ...postForm, content, platform: platform as any });
+      setIsPostModalOpen(true);
+    } catch (error) {
+      console.error("AI Post Generation Error:", error);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAnalyzeAsset = async (asset: Asset) => {
+    if (!selectedProject) return;
+    setAiLoading(true);
+    try {
+      const result = await analyzeMusicMetadata(asset, selectedProject);
+      setAiResult(result);
+    } catch (error) {
+      console.error("AI Music Analysis Error:", error);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAnalyzeTrends = async () => {
+    if (!selectedProject) return;
+    setAiLoading(true);
+    try {
+      const result = await analyzeMarketTrends(selectedProject.artistName);
+      setAiResult(result);
+    } catch (error) {
+      console.error("AI Trend Analysis Error:", error);
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -391,7 +573,7 @@ export default function App() {
         deadline: taskForm.deadline
       });
       setIsTaskModalOpen(false);
-      setTaskForm({ title: '', deadline: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
+      setTaskForm({ title: '', description: '', deadline: format(addDays(new Date(), 7), 'yyyy-MM-dd'), category: 'other' });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `projects/${selectedProjectId}/tasks`);
     }
@@ -414,13 +596,33 @@ export default function App() {
   };
 
   const handleToggleTask = async (task: Task) => {
-    const nextStatus = task.status === 'done' ? 'todo' : 'done';
+    if (!selectedProjectId) return;
+    
+    if (task.status === 'todo') {
+      setTaskToConfirm(task);
+      setIsTaskConfirmOpen(true);
+      return;
+    }
+
     try {
       await updateDoc(doc(db, `projects/${selectedProjectId}/tasks`, task.id), {
-        status: nextStatus
+        status: 'todo'
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}/tasks/${task.id}`);
+    }
+  };
+
+  const confirmTaskCompletion = async () => {
+    if (!selectedProjectId || !taskToConfirm) return;
+    try {
+      await updateDoc(doc(db, `projects/${selectedProjectId}/tasks`, taskToConfirm.id), {
+        status: 'done'
+      });
+      setIsTaskConfirmOpen(false);
+      setTaskToConfirm(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}/tasks/${taskToConfirm.id}`);
     }
   };
 
@@ -449,14 +651,19 @@ export default function App() {
     if (!selectedProjectId || !assetForm.name || !assetForm.url) return;
 
     try {
-      await addDoc(collection(db, `projects/${selectedProjectId}/assets`), {
+      const docRef = await addDoc(collection(db, `projects/${selectedProjectId}/assets`), {
         projectId: selectedProjectId,
         name: assetForm.name,
         type: assetForm.type,
         url: assetForm.url
       });
+      
+      if (assetForm.analyze && selectedProject) {
+        handleAnalyzeAsset({ id: docRef.id, projectId: selectedProjectId, ...assetForm } as Asset);
+      }
+
       setIsAssetModalOpen(false);
-      setAssetForm({ name: '', type: 'audio', url: '' });
+      setAssetForm({ name: '', type: 'audio', url: '', analyze: false });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `projects/${selectedProjectId}/assets`);
     }
@@ -739,25 +946,71 @@ export default function App() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
-                        className="space-y-4"
+                        className="space-y-6"
                       >
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xl font-bold">Release Checklist</h3>
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div className="flex items-center gap-4">
+                            <h3 className="text-xl font-bold">Release Checklist</h3>
+                            <div className="flex items-center bg-zinc-900 rounded-lg p-1 border border-zinc-800">
+                              <button 
+                                onClick={() => setTaskFilter('all')}
+                                className={cn("px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all", taskFilter === 'all' ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:text-zinc-300")}
+                              >
+                                All
+                              </button>
+                              <button 
+                                onClick={() => setTaskFilter('todo')}
+                                className={cn("px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all", taskFilter === 'todo' ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:text-zinc-300")}
+                              >
+                                Todo
+                              </button>
+                              <button 
+                                onClick={() => setTaskFilter('done')}
+                                className={cn("px-3 py-1 text-[10px] font-bold uppercase rounded-md transition-all", taskFilter === 'done' ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:text-zinc-300")}
+                              >
+                                Done
+                              </button>
+                            </div>
+                            <select 
+                              value={taskCategoryFilter}
+                              onChange={(e) => setTaskCategoryFilter(e.target.value)}
+                              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-[10px] font-bold uppercase text-zinc-400 focus:outline-none"
+                            >
+                              <option value="all">All Categories</option>
+                              <option value="social_media">Social Media</option>
+                              <option value="pr">PR</option>
+                              <option value="distribution">Distribution</option>
+                              <option value="creative">Creative</option>
+                              <option value="legal">Legal</option>
+                              <option value="other">Other</option>
+                            </select>
+                          </div>
                           <Button onClick={() => setIsTaskModalOpen(true)} variant="secondary" className="h-9 text-xs">
                             <Plus size={16} />
                             Add Task
                           </Button>
                         </div>
                         <div className="grid gap-3">
-                          {tasks.length === 0 ? (
+                          {tasks.filter(t => {
+                            const statusMatch = taskFilter === 'all' || t.status === taskFilter;
+                            const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
+                            return statusMatch && categoryMatch;
+                          }).length === 0 ? (
                             <div className="text-center py-12 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
-                              <p className="text-zinc-500">No tasks yet. Start planning your drop.</p>
+                              <p className="text-zinc-500">No tasks found matching your filters.</p>
                             </div>
                           ) : (
-                            tasks.map(task => (
+                            tasks.filter(t => {
+                              const statusMatch = taskFilter === 'all' || t.status === taskFilter;
+                              const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
+                              return statusMatch && categoryMatch;
+                            }).map(task => (
                               <div 
                                 key={task.id}
-                                className="group flex items-center gap-4 p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl hover:border-zinc-700 transition-all"
+                                className={cn(
+                                  "group flex items-center gap-4 p-4 rounded-2xl border transition-all",
+                                  task.status === 'done' ? "bg-zinc-900/30 border-zinc-800/50 opacity-60" : "bg-zinc-900 border-zinc-800 hover:border-zinc-700"
+                                )}
                               >
                                 <button 
                                   onClick={() => handleToggleTask(task)}
@@ -775,7 +1028,7 @@ export default function App() {
                                     </p>
                                     {task.category && (
                                       <span className="px-1.5 py-0.5 bg-zinc-800 text-[8px] font-bold uppercase tracking-wider rounded text-zinc-400">
-                                        {task.category}
+                                        {task.category.replace('_', ' ')}
                                       </span>
                                     )}
                                   </div>
@@ -848,7 +1101,35 @@ export default function App() {
                         className="space-y-6"
                       >
                         <div className="flex items-center justify-between">
-                          <h3 className="text-xl font-bold">Promotional Campaign</h3>
+                          <div className="flex items-center gap-4">
+                            <h3 className="text-xl font-bold">Promotional Campaign</h3>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleGeneratePost('instagram')}
+                                disabled={aiLoading}
+                                className="p-2 bg-pink-500/10 text-pink-500 rounded-lg hover:bg-pink-500/20 transition-all disabled:opacity-50"
+                                title="Generate Instagram Post"
+                              >
+                                <Instagram size={18} />
+                              </button>
+                              <button 
+                                onClick={() => handleGeneratePost('twitter')}
+                                disabled={aiLoading}
+                                className="p-2 bg-blue-400/10 text-blue-400 rounded-lg hover:bg-blue-400/20 transition-all disabled:opacity-50"
+                                title="Generate Twitter Post"
+                              >
+                                <Twitter size={18} />
+                              </button>
+                              <button 
+                                onClick={() => handleGeneratePost('tiktok')}
+                                disabled={aiLoading}
+                                className="p-2 bg-zinc-100/10 text-zinc-100 rounded-lg hover:bg-zinc-100/20 transition-all disabled:opacity-50"
+                                title="Generate TikTok Post"
+                              >
+                                <Music size={18} />
+                              </button>
+                            </div>
+                          </div>
                           <Button onClick={() => setIsPostModalOpen(true)} variant="secondary" className="h-9 text-xs">
                             <Plus size={16} />
                             Schedule Post
@@ -1208,16 +1489,24 @@ export default function App() {
                                     <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{artist.genre || 'No Genre'}</p>
                                   </div>
                                 </div>
-                                <button 
-                                  onClick={async () => {
-                                    if(confirm(`Delete ${artist.name}? This will not delete their projects.`)) {
-                                      await deleteDoc(doc(db, 'artists', artist.id));
-                                    }
-                                  }}
-                                  className="p-2 text-zinc-700 hover:text-red-400 transition-colors"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => startEditingArtist(artist)}
+                                    className="p-2 text-zinc-500 hover:text-zinc-100 transition-colors"
+                                  >
+                                    <Edit2 size={18} />
+                                  </button>
+                                  <button 
+                                    onClick={async () => {
+                                      if(confirm(`Delete ${artist.name}? This will not delete their projects.`)) {
+                                        await deleteDoc(doc(db, 'artists', artist.id));
+                                      }
+                                    }}
+                                    className="p-2 text-zinc-700 hover:text-red-400 transition-colors"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
                               </div>
                               <p className="text-sm text-zinc-400 line-clamp-2">{artist.bio || 'No biography provided.'}</p>
                               <div className="pt-4 border-t border-zinc-800 flex items-center justify-between">
@@ -1342,6 +1631,20 @@ export default function App() {
               />
             </div>
           </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Apply Project Template</label>
+            <select 
+              value={selectedTemplateId}
+              onChange={e => setSelectedTemplateId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+            >
+              <option value="">No Template (Blank Project)</option>
+              {projectTemplates.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-zinc-500 mt-2">Templates automatically generate a set of industry-standard tasks.</p>
+          </div>
           <Button type="submit" className="w-full py-4 rounded-xl">Create Project</Button>
         </form>
       </Modal>
@@ -1395,18 +1698,95 @@ export default function App() {
               placeholder="e.g. Final Master Approval"
             />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Deadline</label>
-            <input 
-              type="date" 
-              required
-              value={taskForm.deadline}
-              onChange={e => setTaskForm({...taskForm, deadline: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Deadline</label>
+              <input 
+                type="date" 
+                required
+                value={taskForm.deadline}
+                onChange={e => setTaskForm({...taskForm, deadline: e.target.value})}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Category</label>
+              <select 
+                value={taskForm.category}
+                onChange={e => setTaskForm({...taskForm, category: e.target.value as any})}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              >
+                <option value="social_media">Social Media</option>
+                <option value="pr">PR</option>
+                <option value="distribution">Distribution</option>
+                <option value="creative">Creative</option>
+                <option value="legal">Legal</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
           </div>
           <Button type="submit" className="w-full py-4 rounded-xl">Add Task</Button>
         </form>
+      </Modal>
+
+      <Modal isOpen={isEditingArtist} onClose={() => setIsEditingArtist(false)} title="Edit Artist Details">
+        <form onSubmit={handleUpdateArtist} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Artist Name</label>
+            <input 
+              type="text" 
+              required
+              value={artistForm.name}
+              onChange={e => setArtistForm({...artistForm, name: e.target.value})}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Genre</label>
+            <input 
+              type="text" 
+              value={artistForm.genre}
+              onChange={e => setArtistForm({...artistForm, genre: e.target.value})}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Bio</label>
+            <textarea 
+              value={artistForm.bio}
+              onChange={e => setArtistForm({...artistForm, bio: e.target.value})}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none"
+            />
+          </div>
+          <Button type="submit" className="w-full py-4 rounded-xl">Update Artist</Button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!aiResult} onClose={() => setAiResult(null)} title="AI Analysis Result">
+        <div className="space-y-4">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 prose prose-invert max-w-none">
+            <div className="text-zinc-300 whitespace-pre-wrap leading-relaxed">
+              {aiResult}
+            </div>
+          </div>
+          <Button onClick={() => setAiResult(null)} className="w-full py-4 rounded-xl">Close</Button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isTaskConfirmOpen} onClose={() => setIsTaskConfirmOpen(false)} title="Confirm Task Completion">
+        <div className="space-y-6 text-center">
+          <div className="w-16 h-16 bg-emerald-950/30 text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+            <CheckCircle2 size={32} />
+          </div>
+          <div>
+            <h4 className="text-lg font-bold">Mark as completed?</h4>
+            <p className="text-zinc-500 mt-2">Are you sure you want to mark "{taskToConfirm?.title}" as done?</p>
+          </div>
+          <div className="flex gap-4">
+            <Button variant="ghost" onClick={() => setIsTaskConfirmOpen(false)} className="flex-1">Cancel</Button>
+            <Button onClick={confirmTaskCompletion} className="flex-1 bg-emerald-500 text-zinc-950 hover:bg-emerald-400">Confirm</Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={!!viewingArtistId} onClose={() => setViewingArtistId(null)} title="Artist Profile">
@@ -1533,29 +1913,44 @@ export default function App() {
               placeholder="e.g. Mastered Audio v1"
             />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Asset Type</label>
-            <select 
-              value={assetForm.type}
-              onChange={e => setAssetForm({...assetForm, type: e.target.value as any})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
-            >
-              <option value="audio">Audio</option>
-              <option value="image">Image</option>
-              <option value="video">Video</option>
-              <option value="document">Document</option>
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Asset Type</label>
+              <select 
+                value={assetForm.type}
+                onChange={e => setAssetForm({...assetForm, type: e.target.value as any})}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              >
+                <option value="audio">Audio</option>
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+                <option value="document">Document</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Storage URL</label>
+              <input 
+                type="url" 
+                required
+                value={assetForm.url}
+                onChange={e => setAssetForm({...assetForm, url: e.target.value})}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                placeholder="https://dropbox.com/s/..."
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Storage URL</label>
+          <div className="flex items-center gap-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
             <input 
-              type="url" 
-              required
-              value={assetForm.url}
-              onChange={e => setAssetForm({...assetForm, url: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
-              placeholder="https://dropbox.com/s/..."
+              type="checkbox" 
+              id="analyze-asset"
+              checked={assetForm.analyze}
+              onChange={e => setAssetForm({...assetForm, analyze: e.target.checked})}
+              className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-indigo-500 focus:ring-indigo-500"
             />
+            <label htmlFor="analyze-asset" className="text-xs font-medium text-indigo-400 cursor-pointer flex items-center gap-2">
+              <Sparkles size={14} />
+              AI Analysis (Generate A&R feedback on upload)
+            </label>
           </div>
           <Button type="submit" className="w-full py-4 rounded-xl">Add Asset</Button>
         </form>

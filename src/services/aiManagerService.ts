@@ -84,3 +84,58 @@ export const chatWithManager = async (message: string, context: any) => {
 
   return response.text;
 };
+
+export const generatePostContent = async (platform: string, project: any, tone: string = 'hype') => {
+  const model = "gemini-3-flash-preview";
+  const prompt = `
+    Generate a high-impact social media post for ${platform}.
+    Project: ${project.name} by ${project.artistName}
+    Tone: ${tone}
+    
+    Include relevant hashtags and emojis. Keep it optimized for ${platform}'s audience.
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+  });
+
+  return response.text;
+};
+
+export const analyzeMusicMetadata = async (asset: any, project: any) => {
+  const model = "gemini-3-flash-preview";
+  const prompt = `
+    Analyze the following music asset metadata for the project "${project.name}".
+    Asset: ${JSON.stringify(asset, null, 2)}
+    
+    Provide a professional A&R analysis of the track's potential, suggested target audience, and any technical improvements needed based on the metadata provided.
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+  });
+
+  return response.text;
+};
+
+export const analyzeMarketTrends = async (genre: string) => {
+  const model = "gemini-3-flash-preview";
+  const prompt = `
+    Analyze current market trends for the ${genre} music genre as of March 2026.
+    Focus on:
+    1. Emerging sub-genres or sounds.
+    2. Viral marketing tactics currently working on TikTok/Reels.
+    3. Successful release strategies for independent artists in this space.
+    
+    Provide actionable insights for an artist manager.
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+  });
+
+  return response.text;
+};

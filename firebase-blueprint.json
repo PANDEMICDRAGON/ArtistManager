@@ -40,9 +40,32 @@
         "title": { "type": "string", "description": "Task title." },
         "description": { "type": "string", "description": "Task description." },
         "status": { "type": "string", "enum": ["todo", "in-progress", "done"], "description": "Current task status." },
-        "deadline": { "type": "string", "format": "date", "description": "Task deadline." }
+        "deadline": { "type": "string", "format": "date", "description": "Task deadline." },
+        "category": { "type": "string", "enum": ["social_media", "pr", "distribution", "creative", "legal", "other"], "description": "Task category." }
       },
       "required": ["projectId", "title", "status"]
+    },
+    "ProjectTemplate": {
+      "title": "ProjectTemplate",
+      "description": "A pre-defined set of tasks for a project type.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Template name." },
+        "description": { "type": "string", "description": "Template description." },
+        "tasks": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "category": { "type": "string" },
+              "daysFromStart": { "type": "number", "description": "Days after project creation to set deadline." }
+            }
+          }
+        }
+      },
+      "required": ["name", "tasks"]
     },
     "CampaignPost": {
       "title": "CampaignPost",

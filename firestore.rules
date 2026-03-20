@@ -71,7 +71,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-          ((request.auth.token.email == "MObiero90@gmail.com" || request.auth.token.email == "mobiero90@gmail.com") && request.auth.token.email_verified == true));
+          (request.auth.token.email.lower() == "mobiero90@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function hasRequiredFields(fields) {
@@ -138,7 +138,19 @@ service cloud.firestore {
              isValidUrl(data.url);
     }
 
+    function isValidProjectTemplate(data) {
+      return hasRequiredFields(['name', 'tasks']) &&
+             hasOnlyAllowedFields(['name', 'description', 'tasks']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.tasks is list;
+    }
+
     // Rules
+    match /projectTemplates/{templateId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /artists/{artistId} {
       allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && isValidArtist(request.resource.data);

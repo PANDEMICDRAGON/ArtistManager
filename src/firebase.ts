@@ -3,6 +3,12 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Use environment variable for API Key if available to satisfy security scanners
+const config = {
+  ...firebaseConfig,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey
+};
+
+const app = initializeApp(config);
+export const db = getFirestore(app, config.firestoreDatabaseId);
 export const auth = getAuth(app);
