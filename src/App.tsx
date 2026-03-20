@@ -1538,7 +1538,7 @@ export default function App() {
                   <h3 className="text-2xl font-bold">No Project Selected</h3>
                   <p className="text-zinc-500 max-w-xs">Select a project from the sidebar or create a new one to start managing your drop.</p>
                 </div>
-                <Button onClick={handleCreateProject}>
+                <Button onClick={() => setIsProjectModalOpen(true)}>
                   <Plus size={20} />
                   Create Your First Project
                 </Button>
