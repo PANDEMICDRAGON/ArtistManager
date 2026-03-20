@@ -1,0 +1,187 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: artists
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - genre: string (optional, < 50 chars)
+    //   - bio: string (optional, < 1000 chars)
+    //   - ownerId: string (required, matches creator UID)
+    //
+    // Collection: projects
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - artistId: string (required)
+    //   - artistName: string (required)
+    //   - projectType: string (required, enum: album, mixtape, ep, lp, single)
+    //   - releaseDate: string (required, ISO 8601)
+    //   - status: string (required, enum: planning, recording, mixing, mastering, released)
+    //   - distributionStatus: string (required, enum: not_started, submitted, processing, live, takedown_requested)
+    //   - isrc: string (optional)
+    //   - upc: string (optional)
+    //   - label: string (optional)
+    //   - ownerId: string (required, matches creator UID)
+    //   - createdAt: timestamp (required)
+    //
+    // Sub-collection: projects/{projectId}/tasks
+    // Fields:
+    //   - projectId: string (required)
+    //   - title: string (required, 1-200 chars)
+    //   - description: string (optional)
+    //   - status: string (required, enum: todo, in-progress, done)
+    //   - deadline: string (required, ISO 8601)
+    //   - category: string (optional)
+    //
+    // Sub-collection: projects/{projectId}/campaignPosts
+    // Fields:
+    //   - projectId: string (required)
+    //   - platform: string (required, enum: instagram, twitter, tiktok, facebook)
+    //   - postType: string (required, enum: feed, story, reel, thread, video)
+    //   - content: string (required, 1-2000 chars)
+    //   - scheduledDate: string (required, ISO 8601)
+    //   - status: string (required, enum: draft, scheduled, posted)
+    //
+    // Sub-collection: projects/{projectId}/assets
+    // Fields:
+    //   - projectId: string (required)
+    //   - name: string (required, 1-200 chars)
+    //   - type: string (required, enum: audio, image, video, document)
+    //   - url: string (required, valid URL)
+    //
+    // Collection: users
+    // Fields:
+    //   - role: string (required, enum: admin, user)
+    //   - email: string (required)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          ((request.auth.token.email == "MObiero90@gmail.com" || request.auth.token.email == "mobiero90@gmail.com") && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+    }
+
+    // Domain Validators
+    function isValidArtist(data) {
+      return hasRequiredFields(['name', 'ownerId']) &&
+             hasOnlyAllowedFields(['name', 'genre', 'bio', 'ownerId']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('genre' in data) || (data.genre is string && data.genre.size() <= 50)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000)) &&
+             data.ownerId == request.auth.uid;
+    }
+
+    function isValidProject(data) {
+      return hasRequiredFields(['name', 'artistId', 'artistName', 'projectType', 'releaseDate', 'status', 'distributionStatus', 'ownerId', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'artistId', 'artistName', 'projectType', 'releaseDate', 'status', 'distributionStatus', 'isrc', 'upc', 'label', 'ownerId', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.projectType in ['album', 'mixtape', 'ep', 'lp', 'single'] &&
+             isValidDateString(data.releaseDate) &&
+             data.status in ['planning', 'recording', 'mixing', 'mastering', 'released'] &&
+             data.distributionStatus in ['not_started', 'submitted', 'processing', 'live', 'takedown_requested'] &&
+             data.ownerId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      return hasRequiredFields(['projectId', 'title', 'status', 'deadline']) &&
+             hasOnlyAllowedFields(['projectId', 'title', 'description', 'status', 'deadline', 'category']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.status in ['todo', 'in-progress', 'done'] &&
+             isValidDateString(data.deadline);
+    }
+
+    function isValidCampaignPost(data) {
+      return hasRequiredFields(['projectId', 'platform', 'postType', 'content', 'scheduledDate', 'status']) &&
+             hasOnlyAllowedFields(['projectId', 'platform', 'postType', 'content', 'scheduledDate', 'status']) &&
+             data.platform in ['instagram', 'twitter', 'tiktok', 'facebook'] &&
+             data.postType in ['feed', 'story', 'reel', 'thread', 'video'] &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+             isValidDateString(data.scheduledDate) &&
+             data.status in ['draft', 'scheduled', 'posted'];
+    }
+
+    function isValidAsset(data) {
+      return hasRequiredFields(['projectId', 'name', 'type', 'url']) &&
+             hasOnlyAllowedFields(['projectId', 'name', 'type', 'url']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.type in ['audio', 'image', 'video', 'document'] &&
+             isValidUrl(data.url);
+    }
+
+    // Rules
+    match /artists/{artistId} {
+      allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidArtist(request.resource.data);
+      allow update: if isAuthenticated() && isValidArtist(request.resource.data) && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /projects/{projectId} {
+      allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if isAuthenticated() && isValidProject(request.resource.data) && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+      function isProjectOwner(pId) {
+        return isAuthenticated() && (get(/databases/$(database)/documents/projects/$(pId)).data.ownerId == request.auth.uid || isAdmin());
+      }
+
+      match /tasks/{taskId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidTask(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidTask(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /campaignPosts/{postId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidCampaignPost(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidCampaignPost(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+
+      match /assets/{assetId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId) && isValidAsset(request.resource.data);
+        allow update: if isProjectOwner(projectId) && isValidAsset(request.resource.data);
+        allow delete: if isProjectOwner(projectId);
+      }
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && request.resource.data.role == 'user';
+      allow update: if isAdmin();
+    }
+  }
+}
