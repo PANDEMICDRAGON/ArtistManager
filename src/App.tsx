@@ -12,6 +12,7 @@ import {
 import { auth, db } from './firebase';
 import { handleFirestoreError, OperationType, testConnection } from './services/firestoreService';
 import { fetchArtistStreams, ArtistAnalytics } from './services/streamService';
+import { fetchArtistSocials, ArtistSocialData } from './services/socialMediaService';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { 
   Music, 
@@ -28,6 +29,7 @@ import {
   Instagram, 
   Twitter, 
   Facebook,
+  Youtube,
   MoreVertical,
   ExternalLink,
   Search,
@@ -41,7 +43,8 @@ import {
   AlertCircle,
   FileText,
   TrendingUp,
-  Layout
+  Layout,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addDays, isAfter, isBefore } from 'date-fns';
@@ -189,19 +192,19 @@ const Modal = ({ isOpen, onClose, title, children }: { isOpen: boolean; onClose:
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-black/80 backdrop-blur-sm">
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="bg-zinc-900 border-t md:border border-zinc-800 rounded-t-3xl md:rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl max-h-[90vh] flex flex-col mt-auto md:mt-0"
       >
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+        <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
           <h3 className="text-xl font-bold">{title}</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-100">
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-100 p-2">
             <Plus className="rotate-45" size={24} />
           </button>
         </div>
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto">
           {children}
         </div>
       </motion.div>
@@ -222,19 +225,24 @@ export default function App() {
 
   // Modal States
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
   const [isArtistModalOpen, setIsArtistModalOpen] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isTaskConfirmOpen, setIsTaskConfirmOpen] = useState(false);
+  const [isDeleteProjectModalOpen, setIsDeleteProjectModalOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [taskToConfirm, setTaskToConfirm] = useState<Task | null>(null);
   const [projectTemplates, setProjectTemplates] = useState<ProjectTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [taskFilter, setTaskFilter] = useState<'all' | 'todo' | 'done'>('all');
   const [taskCategoryFilter, setTaskCategoryFilter] = useState<string>('all');
+  const [taskSort, setTaskSort] = useState<'deadline' | 'title' | 'category'>('deadline');
   const [isEditingArtist, setIsEditingArtist] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Form States
   const [projectForm, setProjectForm] = useState({ 
@@ -243,7 +251,10 @@ export default function App() {
     type: 'album' as Project['projectType'],
     isrc: '',
     upc: '',
-    label: ''
+    label: '',
+    releaseDate: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+    status: 'planning' as Project['status'],
+    distributionStatus: 'not_started' as Project['distributionStatus']
   });
   const [artistForm, setArtistForm] = useState({ name: '', genre: '', bio: '' });
   const [postForm, setPostForm] = useState({ platform: 'instagram' as CampaignPost['platform'], postType: 'feed' as CampaignPost['postType'], content: '' });
@@ -257,7 +268,9 @@ export default function App() {
 
   // Analytics State
   const [artistAnalytics, setArtistAnalytics] = useState<ArtistAnalytics | null>(null);
+  const [socialData, setSocialData] = useState<ArtistSocialData | null>(null);
   const [isSyncingAnalytics, setIsSyncingAnalytics] = useState(false);
+  const [isSocialLoading, setIsSocialLoading] = useState(false);
 
   // Sub-collection states
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -302,7 +315,7 @@ export default function App() {
   // Fetch Projects
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'projects'), where('ownerId', '==', user.uid), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'projects'), where('ownerId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project));
       setProjects(pList);
@@ -405,13 +418,19 @@ export default function App() {
   const handleSyncAnalytics = async () => {
     if (!selectedProject) return;
     setIsSyncingAnalytics(true);
+    setIsSocialLoading(true);
     try {
-      const data = await fetchArtistStreams(selectedProject.artistName);
-      setArtistAnalytics(data);
+      const [streamData, social] = await Promise.all([
+        fetchArtistStreams(selectedProject.artistName),
+        fetchArtistSocials(selectedProject.artistName)
+      ]);
+      setArtistAnalytics(streamData);
+      setSocialData(social);
     } catch (error) {
       console.error("Analytics sync failed", error);
     } finally {
       setIsSyncingAnalytics(false);
+      setIsSocialLoading(false);
     }
   };
 
@@ -422,6 +441,43 @@ export default function App() {
     } catch (error) {
       console.error("Login failed", error);
     }
+  };
+
+  const handleUpdateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedProjectId || !projectForm.name) return;
+
+    try {
+      await updateDoc(doc(db, 'projects', selectedProjectId), {
+        name: projectForm.name,
+        projectType: projectForm.type,
+        releaseDate: projectForm.releaseDate,
+        status: projectForm.status || 'planning',
+        distributionStatus: projectForm.distributionStatus || 'not_started',
+        isrc: projectForm.isrc || '',
+        upc: projectForm.upc || '',
+        label: projectForm.label || '',
+        updatedAt: Timestamp.now()
+      });
+      setIsEditProjectModalOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${selectedProjectId}`);
+    }
+  };
+
+  const startEditingProject = (project: Project) => {
+    setProjectForm({
+      name: project.name,
+      artistId: project.artistId,
+      type: project.projectType,
+      isrc: project.isrc || '',
+      upc: project.upc || '',
+      label: project.label || '',
+      releaseDate: project.releaseDate || format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+      status: project.status,
+      distributionStatus: project.distributionStatus
+    });
+    setIsEditProjectModalOpen(true);
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -437,7 +493,7 @@ export default function App() {
         artistId: projectForm.artistId,
         artistName: artist.name,
         projectType: projectForm.type,
-        releaseDate: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+        releaseDate: projectForm.releaseDate,
         status: 'planning',
         distributionStatus: 'not_started',
         isrc: projectForm.isrc || '',
@@ -466,7 +522,17 @@ export default function App() {
       }
 
       setIsProjectModalOpen(false);
-      setProjectForm({ name: '', artistId: '', type: 'album', isrc: '', upc: '', label: '' });
+      setProjectForm({ 
+        name: '', 
+        artistId: '', 
+        type: 'album', 
+        isrc: '', 
+        upc: '', 
+        label: '',
+        releaseDate: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+        status: 'planning',
+        distributionStatus: 'not_started'
+      });
       setSelectedTemplateId('');
       setSelectedProjectId(docRef.id);
     } catch (error) {
@@ -595,6 +661,20 @@ export default function App() {
     }
   };
 
+  const handleDeleteProject = async () => {
+    if (!projectToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'projects', projectToDelete.id));
+      if (selectedProjectId === projectToDelete.id) {
+        setSelectedProjectId(null);
+      }
+      setIsDeleteProjectModalOpen(false);
+      setProjectToDelete(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `projects/${projectToDelete.id}`);
+    }
+  };
+
   const handleToggleTask = async (task: Task) => {
     if (!selectedProjectId) return;
     
@@ -705,109 +785,193 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-black text-zinc-100 flex font-sans">
-        {/* Sidebar */}
-        <aside className="w-72 border-r border-zinc-800 flex flex-col hidden lg:flex">
-          <div className="p-8 flex items-center gap-3">
-            <div className="w-10 h-10 bg-zinc-100 rounded-xl flex items-center justify-center text-zinc-950">
-              <Music size={24} />
+      <div className="min-h-screen bg-black text-zinc-100 flex flex-col lg:flex-row font-sans">
+        {/* Mobile Header */}
+        <div className="lg:hidden h-16 border-b border-zinc-800 flex items-center justify-between px-4 bg-black/50 backdrop-blur-md sticky top-0 z-50">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-zinc-100 rounded-lg flex items-center justify-center text-zinc-950">
+              <Music size={18} />
             </div>
-            <span className="text-xl font-bold tracking-tight">StudioDrop</span>
+            <span className="text-lg font-bold tracking-tight">StudioDrop</span>
           </div>
+          <button 
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 text-zinc-400 hover:text-zinc-100"
+          >
+            {isMobileMenuOpen ? <Plus className="rotate-45" size={24} /> : <Layout size={24} />}
+          </button>
+        </div>
 
-          <nav className="flex-1 px-4 space-y-1">
-            <div className="px-4 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Main</div>
-            <button className="w-full flex items-center gap-3 px-4 py-3 text-zinc-100 bg-zinc-900 rounded-xl">
-              <LayoutDashboard size={20} />
-              <span className="font-medium">Dashboard</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('artists')}
+        {/* Sidebar */}
+        <AnimatePresence mode="wait">
+          {(isMobileMenuOpen || window.innerWidth >= 1024) && (
+            <motion.aside 
+              initial={window.innerWidth < 1024 ? { x: -300 } : { x: 0 }}
+              animate={{ x: 0 }}
+              exit={window.innerWidth < 1024 ? { x: -300 } : { x: 0 }}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors",
-                activeTab === 'artists' ? "bg-zinc-900 text-zinc-100" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                "fixed inset-0 z-40 lg:relative lg:z-0 w-72 border-r border-zinc-800 flex flex-col bg-black lg:bg-transparent",
+                !isMobileMenuOpen && "hidden lg:flex"
               )}
             >
-              <UserIcon size={20} />
-              <span className="font-medium">Artists</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('ai_manager')}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors",
-                activeTab === 'ai_manager' ? "bg-zinc-900 text-zinc-100" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
-              )}
-            >
-              <Sparkles size={20} />
-              <span className="font-medium">AI Manager</span>
-            </button>
-            <button className="w-full flex items-center gap-3 px-4 py-3 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl transition-colors">
-              <Bell size={20} />
-              <span className="font-medium">Notifications</span>
-            </button>
-            
-            <div className="pt-8 px-4 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Projects</div>
-            <div className="space-y-1">
-              {projects.map(p => (
+              <div className="p-8 hidden lg:flex items-center gap-3">
+                <div className="w-10 h-10 bg-zinc-100 rounded-xl flex items-center justify-center text-zinc-950">
+                  <Music size={24} />
+                </div>
+                <span className="text-xl font-bold tracking-tight">StudioDrop</span>
+              </div>
+
+              <nav className="flex-1 px-4 py-8 lg:py-0 space-y-1 overflow-y-auto">
+                <div className="px-4 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Main</div>
                 <button 
-                  key={p.id}
-                  onClick={() => setSelectedProjectId(p.id)}
+                  onClick={() => {
+                    setSelectedProjectId(null);
+                    setIsMobileMenuOpen(false);
+                  }}
                   className={cn(
-                    "w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all group",
-                    selectedProjectId === p.id ? "bg-zinc-100 text-zinc-950" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                    "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors",
+                    !selectedProjectId && activeTab !== 'artists' && activeTab !== 'ai_manager' ? "bg-zinc-900 text-zinc-100" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
                   )}
                 >
-                  <div className="flex items-center gap-3 truncate">
-                    <Music size={18} className={selectedProjectId === p.id ? "text-zinc-950" : "text-zinc-500"} />
-                    <div className="flex flex-col truncate">
-                      <span className="font-bold truncate">{p.name}</span>
-                      <span className={cn("text-[10px] truncate", selectedProjectId === p.id ? "text-zinc-800" : "text-zinc-500")}>
-                        {p.artistName}
-                      </span>
-                    </div>
-                  </div>
-                  {selectedProjectId === p.id && <ChevronRight size={16} />}
+                  <LayoutDashboard size={20} />
+                  <span className="font-medium">Dashboard</span>
                 </button>
-              ))}
-              <button 
-                onClick={() => setIsProjectModalOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-3 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl transition-all border border-dashed border-zinc-800 mt-2"
-              >
-                <Plus size={18} />
-                <span className="font-medium">New Project</span>
-              </button>
-            </div>
-          </nav>
+                <button 
+                  onClick={() => {
+                    setActiveTab('artists');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors",
+                    activeTab === 'artists' ? "bg-zinc-900 text-zinc-100" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                  )}
+                >
+                  <UserIcon size={20} />
+                  <span className="font-medium">Artists</span>
+                </button>
+                <button 
+                  onClick={() => {
+                    setActiveTab('ai_manager');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors",
+                    activeTab === 'ai_manager' ? "bg-zinc-900 text-zinc-100" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                  )}
+                >
+                  <Sparkles size={20} />
+                  <span className="font-medium">AI Manager</span>
+                </button>
+                
+                <div className="pt-8 px-4 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Projects</div>
+                <div className="space-y-1">
+                  {projects.map(p => (
+                    <button 
+                      key={p.id}
+                      onClick={() => {
+                        setSelectedProjectId(p.id);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all group",
+                        selectedProjectId === p.id ? "bg-zinc-100 text-zinc-950" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 truncate">
+                        <Music size={18} className={selectedProjectId === p.id ? "text-zinc-950" : "text-zinc-500"} />
+                        <div className="flex flex-col truncate">
+                          <span className="font-bold truncate">{p.name}</span>
+                          <span className={cn("text-[10px] truncate", selectedProjectId === p.id ? "text-zinc-800" : "text-zinc-500")}>
+                            {p.artistName}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setProjectToDelete(p);
+                            setIsDeleteProjectModalOpen(true);
+                          }}
+                          className={cn(
+                            "p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all",
+                            selectedProjectId === p.id ? "text-zinc-950/50 hover:text-zinc-950 hover:bg-zinc-950/10" : "text-zinc-500 hover:text-red-400 hover:bg-zinc-800"
+                          )}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        {selectedProjectId === p.id && <ChevronRight size={16} />}
+                      </div>
+                    </button>
+                  ))}
+                  <button 
+                    onClick={() => {
+                      setIsProjectModalOpen(true);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl transition-all border border-dashed border-zinc-800 mt-2"
+                  >
+                    <Plus size={18} />
+                    <span className="font-medium">New Project</span>
+                  </button>
+                </div>
+              </nav>
 
-          <div className="p-4 border-t border-zinc-800">
-            <div className="flex items-center gap-3 p-4 bg-zinc-900 rounded-2xl">
-              <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden">
-                {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={20} />}
+              <div className="p-4 border-t border-zinc-800">
+                <div className="flex items-center gap-3 p-4 bg-zinc-900 rounded-2xl">
+                  <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden">
+                    {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={20} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate">{user.displayName}</p>
+                    <p className="text-xs text-zinc-500 truncate">Label Manager</p>
+                  </div>
+                  <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400 transition-colors">
+                    <LogOut size={18} />
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold truncate">{user.displayName}</p>
-                <p className="text-xs text-zinc-500 truncate">Label Manager</p>
-              </div>
-              <button onClick={() => signOut(auth)} className="text-zinc-500 hover:text-red-400 transition-colors">
-                <LogOut size={18} />
-              </button>
-            </div>
-          </div>
-        </aside>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+
+        {/* Sidebar Overlay for Mobile */}
+        {isMobileMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Header */}
-          <header className="h-24 border-b border-zinc-800 flex items-center justify-between px-8 bg-black/50 backdrop-blur-md sticky top-0 z-10">
+          <header className="h-auto lg:h-24 border-b border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between px-4 lg:px-8 py-4 lg:py-0 bg-black/50 backdrop-blur-md sticky top-0 z-10">
             <div className="flex items-center gap-6">
               <div className="flex flex-col">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-bold tracking-tight">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="text-xl lg:text-2xl font-bold tracking-tight flex items-center gap-2">
                     {selectedProject ? selectedProject.name : "Select a Project"}
+                    {selectedProject && (
+                      <button 
+                        onClick={() => startEditingProject(selectedProject)}
+                        className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-100 transition-all"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                    )}
                   </h2>
                   {selectedProject && (
                     <div className="flex items-center gap-2">
-                      <Badge variant="info">{selectedProject.status}</Badge>
+                      <Badge 
+                        variant={
+                          selectedProject.status === 'released' ? 'success' : 
+                          selectedProject.status === 'mastering' ? 'info' : 
+                          selectedProject.status === 'planning' ? 'warning' : 'default'
+                        }
+                      >
+                        {selectedProject.status}
+                      </Badge>
                       <Badge variant={selectedProject.distributionStatus === 'live' ? 'success' : 'warning'}>
                         {selectedProject.distributionStatus.replace('_', ' ')}
                       </Badge>
@@ -815,7 +979,7 @@ export default function App() {
                   )}
                 </div>
                 {selectedProject && (
-                  <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500 font-medium">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] lg:text-xs text-zinc-500 font-medium">
                     <span className="flex items-center gap-1">
                       <UserIcon size={12} />
                       {selectedProject.artistName}
@@ -833,13 +997,13 @@ export default function App() {
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="relative hidden md:block">
+            <div className="flex items-center gap-4 mt-4 lg:mt-0">
+              <div className="relative flex-1 lg:flex-none">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
                 <input 
                   type="text" 
-                  placeholder="Search assets, tasks..." 
-                  className="bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-100 w-64"
+                  placeholder="Search..." 
+                  className="bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-100 w-full lg:w-64"
                 />
               </div>
               <Button variant="secondary" className="hidden md:flex">
@@ -849,7 +1013,7 @@ export default function App() {
           </header>
 
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-8 space-y-8">
+          <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-8">
             {selectedProject ? (
               <>
                 {/* Stats Overview */}
@@ -907,7 +1071,7 @@ export default function App() {
                 </div>
 
                 {/* Tabs Navigation */}
-                <div className="flex border-b border-zinc-800 gap-8">
+                <div className="flex border-b border-zinc-800 gap-8 overflow-x-auto no-scrollbar pb-px">
                   {[
                     { id: 'checklist', label: 'Checklist', icon: CheckSquare },
                     { id: 'ai_manager', label: 'AI Manager', icon: Sparkles },
@@ -921,7 +1085,7 @@ export default function App() {
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id as any)}
                       className={cn(
-                        "flex items-center gap-2 pb-4 text-sm font-bold transition-all relative",
+                        "flex items-center gap-2 pb-4 text-sm font-bold transition-all relative whitespace-nowrap",
                         activeTab === tab.id ? "text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
                       )}
                     >
@@ -984,6 +1148,15 @@ export default function App() {
                               <option value="legal">Legal</option>
                               <option value="other">Other</option>
                             </select>
+                            <select 
+                              value={taskSort}
+                              onChange={(e) => setTaskSort(e.target.value as any)}
+                              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-[10px] font-bold uppercase text-zinc-400 focus:outline-none"
+                            >
+                              <option value="deadline">Sort: Deadline</option>
+                              <option value="title">Sort: Title</option>
+                              <option value="category">Sort: Category</option>
+                            </select>
                           </div>
                           <Button onClick={() => setIsTaskModalOpen(true)} variant="secondary" className="h-9 text-xs">
                             <Plus size={16} />
@@ -991,20 +1164,36 @@ export default function App() {
                           </Button>
                         </div>
                         <div className="grid gap-3">
-                          {tasks.filter(t => {
-                            const statusMatch = taskFilter === 'all' || t.status === taskFilter;
-                            const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
-                            return statusMatch && categoryMatch;
-                          }).length === 0 ? (
+                          {tasks
+                            .filter(t => {
+                              const statusMatch = taskFilter === 'all' || t.status === taskFilter;
+                              const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
+                              return statusMatch && categoryMatch;
+                            })
+                            .sort((a, b) => {
+                              if (taskSort === 'deadline') return a.deadline.localeCompare(b.deadline);
+                              if (taskSort === 'title') return a.title.localeCompare(b.title);
+                              if (taskSort === 'category') return (a.category || '').localeCompare(b.category || '');
+                              return 0;
+                            })
+                            .length === 0 ? (
                             <div className="text-center py-12 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
                               <p className="text-zinc-500">No tasks found matching your filters.</p>
                             </div>
                           ) : (
-                            tasks.filter(t => {
-                              const statusMatch = taskFilter === 'all' || t.status === taskFilter;
-                              const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
-                              return statusMatch && categoryMatch;
-                            }).map(task => (
+                            tasks
+                              .filter(t => {
+                                const statusMatch = taskFilter === 'all' || t.status === taskFilter;
+                                const categoryMatch = taskCategoryFilter === 'all' || t.category === taskCategoryFilter;
+                                return statusMatch && categoryMatch;
+                              })
+                              .sort((a, b) => {
+                                if (taskSort === 'deadline') return a.deadline.localeCompare(b.deadline);
+                                if (taskSort === 'title') return a.title.localeCompare(b.title);
+                                if (taskSort === 'category') return (a.category || '').localeCompare(b.category || '');
+                                return 0;
+                              })
+                              .map(task => (
                               <div 
                                 key={task.id}
                                 className={cn(
@@ -1293,7 +1482,7 @@ export default function App() {
                                         await updateDoc(doc(db, 'projects', selectedProjectId), { isrc: e.target.value });
                                       }
                                     }}
-                                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
                                     placeholder="US-ABC-12-34567"
                                   />
                                 </div>
@@ -1308,7 +1497,7 @@ export default function App() {
                                       await updateDoc(doc(db, 'projects', selectedProjectId), { upc: e.target.value });
                                     }
                                   }}
-                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
                                   placeholder="123456789012"
                                 />
                               </div>
@@ -1322,7 +1511,7 @@ export default function App() {
                                       await updateDoc(doc(db, 'projects', selectedProjectId), { label: e.target.value });
                                     }
                                   }}
-                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
                                   placeholder="e.g. Sony Music / DistroKid"
                                 />
                               </div>
@@ -1350,7 +1539,7 @@ export default function App() {
                                     "w-full text-left p-4 rounded-xl border transition-all flex items-center gap-4",
                                     selectedProject?.distributionStatus === status.id 
                                       ? "bg-zinc-100 border-zinc-100 text-zinc-950" 
-                                      : "bg-zinc-950/50 border-zinc-800 text-zinc-400 hover:border-zinc-600"
+                                      : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-600"
                                   )}
                                 >
                                   <div className={cn(
@@ -1411,7 +1600,7 @@ export default function App() {
                           </div>
                         )}
                         
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                           <Card className="h-[400px]">
                             <h4 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-6">Stream Distribution</h4>
                             <ResponsiveContainer width="100%" height="100%">
@@ -1447,7 +1636,7 @@ export default function App() {
                                 { name: 'Track 2', streams: 95000 },
                                 { name: 'Track 3', streams: 80000 },
                               ]).map((track, i) => (
-                                <div key={i} className="flex items-center justify-between p-4 bg-zinc-950/50 rounded-xl border border-zinc-800">
+                                <div key={i} className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl border border-zinc-800">
                                   <div className="flex items-center gap-4">
                                     <span className="text-zinc-500 font-mono">0{i+1}</span>
                                     <p className="font-bold">{track.name}</p>
@@ -1455,6 +1644,51 @@ export default function App() {
                                   <p className="text-zinc-400 font-mono text-sm">{track.streams.toLocaleString()} streams</p>
                                 </div>
                               ))}
+                            </div>
+                          </Card>
+
+                          <Card className="h-[400px] overflow-y-auto">
+                            <div className="flex items-center justify-between mb-6">
+                              <h4 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Social Media Presence</h4>
+                              {isSocialLoading && <Sparkles className="animate-pulse text-emerald-400" size={16} />}
+                            </div>
+                            <div className="space-y-4">
+                              {socialData?.stats && socialData.stats.length > 0 ? (
+                                socialData.stats.map((stat, i) => (
+                                  <div key={i} className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                                    <div className="flex items-center gap-4">
+                                      <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
+                                        {stat.platform === 'instagram' && <Instagram size={20} />}
+                                        {stat.platform === 'twitter' && <Twitter size={20} />}
+                                        {stat.platform === 'youtube' && <Youtube size={20} />}
+                                        {stat.platform === 'facebook' && <Facebook size={20} />}
+                                        {stat.platform === 'tiktok' && <Music size={20} />}
+                                      </div>
+                                      <div>
+                                        <p className="font-bold capitalize">{stat.platform}</p>
+                                        <p className="text-xs text-zinc-500">{stat.handle}</p>
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="font-bold text-zinc-100">{stat.followers.toLocaleString()}</p>
+                                      <div className="flex items-center justify-end gap-2">
+                                        {stat.engagementRate && (
+                                          <span className="text-[10px] text-emerald-400 font-bold">
+                                            {stat.engagementRate}% ER
+                                          </span>
+                                        )}
+                                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Followers</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="flex flex-col items-center justify-center h-full text-zinc-500 py-12">
+                                  <Users size={48} className="mb-4 opacity-20" />
+                                  <p className="text-sm">No social data available</p>
+                                  <p className="text-xs opacity-50">Sync analytics to fetch latest stats</p>
+                                </div>
+                              )}
                             </div>
                           </Card>
                         </div>
@@ -1530,18 +1764,82 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center space-y-6">
-                <div className="w-24 h-24 bg-zinc-900 rounded-3xl flex items-center justify-center text-zinc-700">
-                  <Music size={48} />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-bold">No Project Selected</h3>
-                  <p className="text-zinc-500 max-w-xs">Select a project from the sidebar or create a new one to start managing your drop.</p>
-                </div>
-                <Button onClick={() => setIsProjectModalOpen(true)}>
-                  <Plus size={20} />
-                  Create Your First Project
-                </Button>
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-4xl mx-auto">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="space-y-8 w-full"
+                >
+                  <div className="w-24 h-24 bg-zinc-900 rounded-3xl flex items-center justify-center text-zinc-100 mx-auto shadow-2xl border border-zinc-800">
+                    <Music size={48} />
+                  </div>
+                  
+                  {artists.length === 0 ? (
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <h3 className="text-3xl font-bold tracking-tight">Welcome to StudioDrop</h3>
+                        <p className="text-zinc-400 max-w-md mx-auto text-lg">The industry standard for managing music releases. Let's start by setting up your first artist profile.</p>
+                      </div>
+                      <div className="flex flex-col items-center gap-4">
+                        <Button onClick={() => setIsArtistModalOpen(true)} className="px-8 py-6 text-lg rounded-2xl shadow-xl shadow-zinc-900/20">
+                          <Plus size={24} />
+                          Create Your First Artist
+                        </Button>
+                        <p className="text-xs text-zinc-600 uppercase tracking-widest font-bold">Step 1 of 2: Artist Setup</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-8">
+                      <div className="space-y-2">
+                        <h3 className="text-3xl font-bold tracking-tight">Ready for your next drop?</h3>
+                        <p className="text-zinc-400 max-w-md mx-auto text-lg">Select an artist to view their projects, or create a new release project to get started.</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
+                        <Card className="p-6 hover:border-zinc-500 transition-colors cursor-pointer group" onClick={() => setIsProjectModalOpen(true)}>
+                          <div className="w-12 h-12 bg-zinc-100 rounded-xl flex items-center justify-center text-zinc-950 mb-4 group-hover:scale-110 transition-transform">
+                            <Plus size={24} />
+                          </div>
+                          <h4 className="text-xl font-bold mb-2">New Project</h4>
+                          <p className="text-zinc-500 text-sm">Create a new release, album, or single for one of your artists.</p>
+                        </Card>
+                        
+                        <Card className="p-6 hover:border-zinc-500 transition-colors cursor-pointer group" onClick={() => setActiveTab('artists')}>
+                          <div className="w-12 h-12 bg-zinc-900 rounded-xl flex items-center justify-center text-zinc-100 mb-4 border border-zinc-800 group-hover:scale-110 transition-transform">
+                            <Users size={24} />
+                          </div>
+                          <h4 className="text-xl font-bold mb-2">Manage Artists</h4>
+                          <p className="text-zinc-500 text-sm">View and edit your roster of {artists.length} artist{artists.length === 1 ? '' : 's'}.</p>
+                        </Card>
+                      </div>
+
+                      <div className="pt-8 border-t border-zinc-900">
+                        <p className="text-xs text-zinc-600 uppercase tracking-widest font-bold mb-4">Your Artists</p>
+                        <div className="flex flex-wrap justify-center gap-3">
+                          {artists.map(artist => (
+                            <button 
+                              key={artist.id}
+                              onClick={() => {
+                                // Find first project for this artist if exists
+                                const artistProject = projects.find(p => p.artistId === artist.id);
+                                if (artistProject) {
+                                  setSelectedProjectId(artistProject.id);
+                                } else {
+                                  setProjectForm({ ...projectForm, artistId: artist.id });
+                                  setIsProjectModalOpen(true);
+                                }
+                              }}
+                              className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-full text-sm font-medium transition-colors flex items-center gap-2"
+                            >
+                              <div className="w-2 h-2 rounded-full bg-zinc-500" />
+                              {artist.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
               </div>
             )}
           </div>
@@ -1549,6 +1847,91 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      <Modal isOpen={isEditProjectModalOpen} onClose={() => setIsEditProjectModalOpen(false)} title="Edit Project">
+        <form onSubmit={handleUpdateProject} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Project Name</label>
+            <input 
+              type="text" 
+              required
+              value={projectForm.name}
+              onChange={e => setProjectForm({...projectForm, name: e.target.value})}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
+              placeholder="e.g. Midnight City"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Project Type</label>
+              <select 
+                value={projectForm.type}
+                onChange={e => setProjectForm({...projectForm, type: e.target.value as any})}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
+              >
+                <option value="album">Album</option>
+                <option value="mixtape">Mixtape</option>
+                <option value="ep">EP</option>
+                <option value="lp">LP</option>
+                <option value="single">Single</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Release Date</label>
+              <input 
+                type="date" 
+                required
+                value={projectForm.releaseDate}
+                onChange={e => setProjectForm({...projectForm, releaseDate: e.target.value})}
+                className={cn(
+                  "w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100",
+                  isBefore(new Date(projectForm.releaseDate), new Date()) && "border-amber-500/50 text-amber-500"
+                )}
+              />
+              {isBefore(new Date(projectForm.releaseDate), new Date()) && (
+                <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1">
+                  <AlertCircle size={10} />
+                  Date is in the past
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Project Status</label>
+              <select 
+                value={projectForm.status}
+                onChange={e => setProjectForm({...projectForm, status: e.target.value as any})}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
+              >
+                <option value="planning">Planning</option>
+                <option value="recording">Recording</option>
+                <option value="mixing">Mixing</option>
+                <option value="mastering">Mastering</option>
+                <option value="released">Released</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Distribution Status</label>
+              <select 
+                value={projectForm.distributionStatus}
+                onChange={e => setProjectForm({...projectForm, distributionStatus: e.target.value as any})}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
+              >
+                <option value="not_started">Not Started</option>
+                <option value="submitted">Submitted</option>
+                <option value="processing">Processing</option>
+                <option value="live">Live</option>
+                <option value="takedown_requested">Takedown Requested</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <Button type="button" variant="ghost" onClick={() => setIsEditProjectModalOpen(false)}>Cancel</Button>
+            <Button type="submit">Save Changes</Button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal isOpen={isProjectModalOpen} onClose={() => setIsProjectModalOpen(false)} title="New Project Release">
         <form onSubmit={handleCreateProject} className="space-y-4">
           <div>
@@ -1558,7 +1941,7 @@ export default function App() {
               required
               value={projectForm.name}
               onChange={e => setProjectForm({...projectForm, name: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
               placeholder="e.g. Midnight City"
             />
           </div>
@@ -1568,7 +1951,7 @@ export default function App() {
               required
               value={projectForm.artistId}
               onChange={e => setProjectForm({...projectForm, artistId: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
             >
               <option value="">Select Artist</option>
               {artists.map(a => (
@@ -1589,7 +1972,7 @@ export default function App() {
               <select 
                 value={projectForm.type}
                 onChange={e => setProjectForm({...projectForm, type: e.target.value as any})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               >
                 <option value="album">Album</option>
                 <option value="mixtape">Mixtape</option>
@@ -1604,7 +1987,7 @@ export default function App() {
                 type="text" 
                 value={projectForm.label}
                 onChange={e => setProjectForm({...projectForm, label: e.target.value})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
                 placeholder="e.g. Sony Music"
               />
             </div>
@@ -1616,7 +1999,7 @@ export default function App() {
                 type="text" 
                 value={projectForm.isrc}
                 onChange={e => setProjectForm({...projectForm, isrc: e.target.value})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
                 placeholder="US-ABC-12-34567"
               />
             </div>
@@ -1626,17 +2009,36 @@ export default function App() {
                 type="text" 
                 value={projectForm.upc}
                 onChange={e => setProjectForm({...projectForm, upc: e.target.value})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
                 placeholder="123456789012"
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Release Date</label>
+            <input 
+              type="date" 
+              required
+              value={projectForm.releaseDate}
+              onChange={e => setProjectForm({...projectForm, releaseDate: e.target.value})}
+              className={cn(
+                "w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100",
+                isBefore(new Date(projectForm.releaseDate), new Date()) && "border-amber-500/50 text-amber-500"
+              )}
+            />
+            {isBefore(new Date(projectForm.releaseDate), new Date()) && (
+              <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1">
+                <AlertCircle size={10} />
+                Date is in the past
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Apply Project Template</label>
             <select 
               value={selectedTemplateId}
               onChange={e => setSelectedTemplateId(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
             >
               <option value="">No Template (Blank Project)</option>
               {projectTemplates.map(t => (
@@ -1649,6 +2051,34 @@ export default function App() {
         </form>
       </Modal>
 
+        <Modal 
+          isOpen={isDeleteProjectModalOpen} 
+          onClose={() => setIsDeleteProjectModalOpen(false)} 
+          title="Delete Project"
+        >
+          <div className="space-y-6">
+            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+              Are you sure you want to delete <strong>{projectToDelete?.name}</strong>? This action cannot be undone and all associated tasks, assets, and campaign data will be permanently removed.
+            </div>
+            <div className="flex gap-3">
+              <Button 
+                variant="secondary" 
+                className="flex-1" 
+                onClick={() => setIsDeleteProjectModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button 
+                variant="danger" 
+                className="flex-1" 
+                onClick={handleDeleteProject}
+              >
+                Delete Project
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
       <Modal isOpen={isArtistModalOpen} onClose={() => setIsArtistModalOpen(false)} title="Create New Artist">
         <form onSubmit={handleCreateArtist} className="space-y-4">
           <div>
@@ -1658,7 +2088,7 @@ export default function App() {
               required
               value={artistForm.name}
               onChange={e => setArtistForm({...artistForm, name: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
               placeholder="e.g. The Weekend"
             />
           </div>
@@ -1668,7 +2098,7 @@ export default function App() {
               type="text" 
               value={artistForm.genre}
               onChange={e => setArtistForm({...artistForm, genre: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
               placeholder="e.g. R&B, Pop"
             />
           </div>
@@ -1677,7 +2107,7 @@ export default function App() {
             <textarea 
               value={artistForm.bio}
               onChange={e => setArtistForm({...artistForm, bio: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none text-zinc-100 placeholder-zinc-500"
               placeholder="Artist background and story..."
             />
           </div>
@@ -1694,7 +2124,7 @@ export default function App() {
               required
               value={taskForm.title}
               onChange={e => setTaskForm({...taskForm, title: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
               placeholder="e.g. Final Master Approval"
             />
           </div>
@@ -1706,7 +2136,7 @@ export default function App() {
                 required
                 value={taskForm.deadline}
                 onChange={e => setTaskForm({...taskForm, deadline: e.target.value})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               />
             </div>
             <div>
@@ -1714,7 +2144,7 @@ export default function App() {
               <select 
                 value={taskForm.category}
                 onChange={e => setTaskForm({...taskForm, category: e.target.value as any})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               >
                 <option value="social_media">Social Media</option>
                 <option value="pr">PR</option>
@@ -1738,7 +2168,7 @@ export default function App() {
               required
               value={artistForm.name}
               onChange={e => setArtistForm({...artistForm, name: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
             />
           </div>
           <div>
@@ -1747,7 +2177,7 @@ export default function App() {
               type="text" 
               value={artistForm.genre}
               onChange={e => setArtistForm({...artistForm, genre: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
             />
           </div>
           <div>
@@ -1755,7 +2185,7 @@ export default function App() {
             <textarea 
               value={artistForm.bio}
               onChange={e => setArtistForm({...artistForm, bio: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none text-zinc-100"
             />
           </div>
           <Button type="submit" className="w-full py-4 rounded-xl">Update Artist</Button>
@@ -1764,7 +2194,7 @@ export default function App() {
 
       <Modal isOpen={!!aiResult} onClose={() => setAiResult(null)} title="AI Analysis Result">
         <div className="space-y-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 prose prose-invert max-w-none">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 prose prose-invert max-w-none shadow-xl">
             <div className="text-zinc-300 whitespace-pre-wrap leading-relaxed">
               {aiResult}
             </div>
@@ -1820,7 +2250,7 @@ export default function App() {
                       setViewingArtistId(null);
                       setActiveTab('checklist');
                     }}
-                    className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-zinc-600 transition-all cursor-pointer group"
+                    className="flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-600 transition-all cursor-pointer group shadow-sm"
                   >
                     <div className="flex items-center gap-3">
                       <Music size={18} className="text-zinc-500 group-hover:text-zinc-100" />
@@ -1863,7 +2293,7 @@ export default function App() {
               <select 
                 value={postForm.platform}
                 onChange={e => setPostForm({...postForm, platform: e.target.value as any})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               >
                 <option value="instagram">Instagram</option>
                 <option value="twitter">Twitter</option>
@@ -1876,7 +2306,7 @@ export default function App() {
               <select 
                 value={postForm.postType}
                 onChange={e => setPostForm({...postForm, postType: e.target.value as any})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               >
                 <option value="feed">Feed Post</option>
                 <option value="story">Story</option>
@@ -1892,7 +2322,7 @@ export default function App() {
               required
               value={postForm.content}
               onChange={e => setPostForm({...postForm, content: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 h-32 resize-none text-zinc-100 placeholder-zinc-500"
               placeholder="Write your post content here..."
             />
           </div>
@@ -1909,7 +2339,7 @@ export default function App() {
               required
               value={assetForm.name}
               onChange={e => setAssetForm({...assetForm, name: e.target.value})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
               placeholder="e.g. Mastered Audio v1"
             />
           </div>
@@ -1919,7 +2349,7 @@ export default function App() {
               <select 
                 value={assetForm.type}
                 onChange={e => setAssetForm({...assetForm, type: e.target.value as any})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100"
               >
                 <option value="audio">Audio</option>
                 <option value="image">Image</option>
@@ -1934,7 +2364,7 @@ export default function App() {
                 required
                 value={assetForm.url}
                 onChange={e => setAssetForm({...assetForm, url: e.target.value})}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-zinc-100 text-zinc-100 placeholder-zinc-500"
                 placeholder="https://dropbox.com/s/..."
               />
             </div>
@@ -1945,7 +2375,7 @@ export default function App() {
               id="analyze-asset"
               checked={assetForm.analyze}
               onChange={e => setAssetForm({...assetForm, analyze: e.target.checked})}
-              className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-indigo-500 focus:ring-indigo-500"
+              className="w-4 h-4 rounded border-zinc-800 bg-zinc-900 text-indigo-500 focus:ring-indigo-500"
             />
             <label htmlFor="analyze-asset" className="text-xs font-medium text-indigo-400 cursor-pointer flex items-center gap-2">
               <Sparkles size={14} />

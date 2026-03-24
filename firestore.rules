@@ -87,7 +87,7 @@ service cloud.firestore {
     }
 
     function isValidDateString(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*$");
     }
 
     // Domain Validators
@@ -102,12 +102,11 @@ service cloud.firestore {
 
     function isValidProject(data) {
       return hasRequiredFields(['name', 'artistId', 'artistName', 'projectType', 'releaseDate', 'status', 'distributionStatus', 'ownerId', 'createdAt']) &&
-             hasOnlyAllowedFields(['name', 'artistId', 'artistName', 'projectType', 'releaseDate', 'status', 'distributionStatus', 'isrc', 'upc', 'label', 'ownerId', 'createdAt']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.projectType in ['album', 'mixtape', 'ep', 'lp', 'single'] &&
+             data.name is string && data.name.size() > 0 &&
+             data.projectType is string &&
              isValidDateString(data.releaseDate) &&
-             data.status in ['planning', 'recording', 'mixing', 'mastering', 'released'] &&
-             data.distributionStatus in ['not_started', 'submitted', 'processing', 'live', 'takedown_requested'] &&
+             data.status is string &&
+             data.distributionStatus is string &&
              data.ownerId == request.auth.uid &&
              data.createdAt is timestamp;
     }

@@ -89,18 +89,18 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 lg:space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center">
+          <div className="w-10 h-10 bg-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center shrink-0">
             <Sparkles size={24} />
           </div>
           <div>
-            <h3 className="text-xl font-bold">AI Manager</h3>
-            <p className="text-xs text-zinc-500 font-medium">A&R, PR & Business Suite</p>
+            <h3 className="text-lg lg:text-xl font-bold">AI Manager</h3>
+            <p className="text-[10px] lg:text-xs text-zinc-500 font-medium">A&R, PR & Business Suite</p>
           </div>
         </div>
-        <div className="flex bg-zinc-900 rounded-xl p-1 border border-zinc-800">
+        <div className="flex bg-zinc-900 rounded-xl p-1 border border-zinc-800 self-start sm:self-auto">
           <button 
             onClick={() => setActiveSection('strategy')}
             className={cn(
@@ -129,57 +129,57 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8"
           >
             {loading ? (
-              <div className="col-span-full py-24 flex flex-col items-center justify-center gap-4">
-                <Loader2 className="animate-spin text-indigo-400" size={40} />
-                <p className="text-zinc-500 font-medium">Analyzing project data & market trends...</p>
+              <div className="col-span-full py-12 lg:py-24 flex flex-col items-center justify-center gap-4">
+                <Loader2 className="animate-spin text-indigo-400" size={32} />
+                <p className="text-zinc-500 text-sm font-medium">Analyzing project data & market trends...</p>
               </div>
             ) : strategy ? (
               <>
-                <div className="lg:col-span-2 space-y-8">
-                  <section className="space-y-4">
+                <div className="lg:col-span-2 space-y-6 lg:space-y-8">
+                  <section className="space-y-3 lg:space-y-4">
                     <div className="flex items-center gap-2 text-indigo-400">
                       <BrainCircuit size={18} />
-                      <h4 className="text-sm font-bold uppercase tracking-widest">A&R Analysis</h4>
+                      <h4 className="text-xs lg:text-sm font-bold uppercase tracking-widest">A&R Analysis</h4>
                     </div>
-                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 leading-relaxed text-zinc-300">
+                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-4 lg:p-6 leading-relaxed text-sm lg:text-base text-zinc-300">
                       {strategy.arFeedback}
                     </div>
                   </section>
 
-                  <section className="space-y-4">
+                  <section className="space-y-3 lg:space-y-4">
                     <div className="flex items-center gap-2 text-emerald-400">
                       <Megaphone size={18} />
-                      <h4 className="text-sm font-bold uppercase tracking-widest">PR & Marketing</h4>
+                      <h4 className="text-xs lg:text-sm font-bold uppercase tracking-widest">PR & Marketing</h4>
                     </div>
-                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 leading-relaxed text-zinc-300">
+                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-4 lg:p-6 leading-relaxed text-sm lg:text-base text-zinc-300">
                       {strategy.prPlan}
                     </div>
                   </section>
 
-                  <section className="space-y-4">
+                  <section className="space-y-3 lg:space-y-4">
                     <div className="flex items-center gap-2 text-amber-400">
                       <Briefcase size={18} />
-                      <h4 className="text-sm font-bold uppercase tracking-widest">Business Strategy</h4>
+                      <h4 className="text-xs lg:text-sm font-bold uppercase tracking-widest">Business Strategy</h4>
                     </div>
-                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 leading-relaxed text-zinc-300">
+                    <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-4 lg:p-6 leading-relaxed text-sm lg:text-base text-zinc-300">
                       {strategy.businessAdvice}
                     </div>
                   </section>
                 </div>
 
                 <div className="space-y-6">
-                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-6">
-                    <h4 className="text-sm font-bold text-indigo-400 uppercase tracking-widest mb-4">Manager's Summary</h4>
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4 lg:p-6">
+                    <h4 className="text-xs lg:text-sm font-bold text-indigo-400 uppercase tracking-widest mb-4">Manager's Summary</h4>
                     <p className="text-sm text-zinc-300 leading-relaxed">
                       {strategy.summary}
                     </p>
                   </div>
 
                   <div className="space-y-4">
-                    <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Suggested Actions</h4>
+                    <h4 className="text-[10px] lg:text-xs font-bold text-zinc-500 uppercase tracking-widest">Suggested Actions</h4>
                     <div className="space-y-3">
                       {strategy.suggestedTasks.map((task, idx) => (
                         <div 
@@ -196,7 +196,7 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
                             </div>
                             <button 
                               onClick={() => onAddTask(task)}
-                              className="w-8 h-8 rounded-lg bg-zinc-800 text-zinc-400 flex items-center justify-center hover:bg-indigo-500 hover:text-white transition-all"
+                              className="w-8 h-8 rounded-lg bg-zinc-800 text-zinc-400 flex items-center justify-center hover:bg-indigo-500 hover:text-white transition-all shrink-0"
                             >
                               <Plus size={16} />
                             </button>
@@ -208,10 +208,10 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
                 </div>
               </>
             ) : (
-              <div className="col-span-full py-24 text-center">
+              <div className="col-span-full py-12 lg:py-24 text-center">
                 <button 
                   onClick={handleGenerateStrategy}
-                  className="px-6 py-3 bg-indigo-500 text-white rounded-xl font-bold hover:bg-indigo-600 transition-all"
+                  className="px-6 py-3 bg-indigo-500 text-white rounded-xl font-bold hover:bg-indigo-600 transition-all text-sm lg:text-base"
                 >
                   Generate Management Strategy
                 </button>
@@ -224,17 +224,17 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="flex flex-col h-[600px] bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden"
+            className="flex flex-col h-[500px] lg:h-[600px] bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden"
           >
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-6">
               {chatHistory.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 px-12">
-                  <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center">
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 px-6 lg:px-12">
+                  <div className="w-12 h-12 lg:w-16 lg:h-16 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center">
                     <MessageSquare size={32} />
                   </div>
                   <div>
-                    <h4 className="text-lg font-bold">Consult your AI Manager</h4>
-                    <p className="text-sm text-zinc-500">Ask about contract terms, marketing ideas, or A&R feedback on your latest demo.</p>
+                    <h4 className="text-base lg:text-lg font-bold">Consult your AI Manager</h4>
+                    <p className="text-xs lg:text-sm text-zinc-500">Ask about contract terms, marketing ideas, or A&R feedback on your latest demo.</p>
                   </div>
                 </div>
               )}
@@ -242,43 +242,43 @@ export const AIManager: React.FC<AIManagerProps> = ({ project, tasks, assets, on
                 <div 
                   key={idx}
                   className={cn(
-                    "flex flex-col max-w-[80%]",
+                    "flex flex-col max-w-[85%] lg:max-w-[80%]",
                     msg.role === 'user' ? "ml-auto items-end" : "items-start"
                   )}
                 >
                   <div className={cn(
-                    "p-4 rounded-2xl text-sm leading-relaxed",
+                    "p-3 lg:p-4 rounded-2xl text-xs lg:text-sm leading-relaxed",
                     msg.role === 'user' 
                       ? "bg-indigo-500 text-white rounded-tr-none" 
                       : "bg-zinc-800 text-zinc-100 rounded-tl-none"
                   )}>
                     {msg.text}
                   </div>
-                  <span className="text-[10px] text-zinc-500 mt-1 uppercase font-bold tracking-widest">
+                  <span className="text-[8px] lg:text-[10px] text-zinc-500 mt-1 uppercase font-bold tracking-widest">
                     {msg.role === 'user' ? 'You' : 'AI Manager'}
                   </span>
                 </div>
               ))}
               {isChatLoading && (
                 <div className="flex items-start gap-3">
-                  <div className="bg-zinc-800 p-4 rounded-2xl rounded-tl-none">
+                  <div className="bg-zinc-800 p-3 lg:p-4 rounded-2xl rounded-tl-none">
                     <Loader2 className="animate-spin text-indigo-400" size={16} />
                   </div>
                 </div>
               )}
             </div>
-            <form onSubmit={handleSendMessage} className="p-4 bg-zinc-900 border-t border-zinc-800 flex gap-3">
+            <form onSubmit={handleSendMessage} className="p-3 lg:p-4 bg-zinc-900 border-t border-zinc-800 flex gap-2 lg:gap-3">
               <input 
                 type="text" 
                 value={chatMessage}
                 onChange={(e) => setChatMessage(e.target.value)}
-                placeholder="Ask your manager anything..."
-                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                placeholder="Ask anything..."
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 lg:px-4 py-2 lg:py-3 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-100 placeholder-zinc-500"
               />
               <button 
                 type="submit"
                 disabled={!chatMessage.trim() || isChatLoading}
-                className="w-12 h-12 bg-indigo-500 text-white rounded-xl flex items-center justify-center hover:bg-indigo-600 transition-all disabled:opacity-50"
+                className="w-10 h-10 lg:w-12 lg:h-12 bg-indigo-500 text-white rounded-xl flex items-center justify-center hover:bg-indigo-600 transition-all disabled:opacity-50 shrink-0"
               >
                 <Send size={20} />
               </button>

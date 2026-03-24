@@ -21,15 +21,13 @@ export interface ArtistAnalytics {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export const fetchArtistStreams = async (artistName: string): Promise<ArtistAnalytics> => {
-  // In a real app, you'd call Spotify's API here.
-  // We'll use Gemini to provide a realistic "snapshot" of data for the demo
-  // if no real API key is provided for Spotify.
-  
+  // Use Gemini with Google Search to get actual streaming data
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Generate realistic streaming analytics data for the artist "${artistName}". 
-      Include total streams, monthly listeners, top 3 tracks with stream counts, and platform breakdown (Spotify, Apple Music, YouTube).
+      contents: `Search for and pull the ACTUAL current streaming analytics for the musical artist "${artistName}". 
+      Include total streams (approximate if needed), monthly listeners on Spotify, and their top 3 most streamed tracks with stream counts.
+      Also provide a breakdown of streams across Spotify, Apple Music, and YouTube if available.
       Return ONLY a JSON object matching this structure:
       {
         "totalStreams": number,
@@ -38,6 +36,7 @@ export const fetchArtistStreams = async (artistName: string): Promise<ArtistAnal
         "platformBreakdown": { "Spotify": number, "Apple Music": number, "YouTube": number }
       }`,
       config: {
+        tools: [{ googleSearch: {} }],
         responseMimeType: "application/json"
       }
     });
@@ -51,7 +50,7 @@ export const fetchArtistStreams = async (artistName: string): Promise<ArtistAnal
     };
   } catch (error) {
     console.error("Failed to fetch stream data", error);
-    // Return mock fallback
+    // Return mock fallback as a last resort
     return {
       totalStreams: 1250000,
       monthlyListeners: 45000,
